@@ -1,0 +1,128 @@
+name: MigrationMind Risk Analysis
+
+on:
+  pull_request:
+    paths:
+      - "**/migrations/*.sql"
+      - "**/migrate/*.sql"
+      - "**/*migration*.sql"
+      - "**/*_migrate.sql"
+
+jobs:
+  analyze:
+    name: Analyze Migration Risk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install MigrationMind
+        run: pip install migrationmind
+
+      - name: Get changed migration files
+        id: changed
+        run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | grep -E '\.(sql)$' \
+            | grep -i 'migrat' \
+            > changed_migrations.txt || true
+          echo "files=$(cat changed_migrations.txt | tr '\n' ' ')" >> $GITHUB_OUTPUT
+          echo "count=$(wc -l < changed_migrations.txt)" >> $GITHUB_OUTPUT
+
+      - name: Run MigrationMind analysis
+        id: analysis
+        if: steps.changed.outputs.count != '0'
+        env:
+          LITELLM_MODEL: ${{ secrets.MIGRATIONMIND_MODEL || 'gpt-4o' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          REPORT=""
+          EXIT_CODE=0
+
+          for migration in $(cat changed_migrations.txt); do
+            echo "Analyzing: $migration"
+
+            # Find schema dump if it exists
+            SCHEMA_ARG=""
+            if [ -f "schema_dump.sql" ]; then
+              SCHEMA_ARG="--schema schema_dump.sql"
+            fi
+
+            # Run analysis and capture markdown output
+            migrationmind analyze \
+              --migration "$migration" \
+              $SCHEMA_ARG \
+              --output markdown \
+              --no-llm \
+              >> migration_report.md 2>&1 || EXIT_CODE=$?
+          done
+
+          # Store report for PR comment step
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+      - name: Post risk report as PR comment
+        if: steps.changed.outputs.count != '0' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let report = '';
+
+            try {
+              report = fs.readFileSync('migration_report.md', 'utf8');
+            } catch (e) {
+              report = '> ⚠️ MigrationMind could not generate a report. Check the workflow logs.';
+            }
+
+            // Truncate if too long for GitHub comment (65536 char limit)
+            if (report.length > 60000) {
+              report = report.substring(0, 60000) + '\n\n*[Report truncated — see workflow logs for full output]*';
+            }
+
+            const body = `<!-- migrationmind-report -->\n${report}`;
+
+            // Find existing comment to update
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.body.includes('<!-- migrationmind-report -->')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Fail if HIGH or CRITICAL risk detected
+        if: steps.analysis.outputs.exit_code == '2'
+        run: |
+          echo "❌ MigrationMind detected HIGH or CRITICAL risk in this migration."
+          echo "Review the risk report in the PR comments before merging."
+          exit 1
