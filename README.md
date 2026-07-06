@@ -2,6 +2,8 @@
 
 > **AI-powered database migration risk analyzer.** Know exactly what will break, how long it'll take, and whether you can safely roll back — *before* you run a single query in production.
 
+[![CI Pipeline](https://github.com/H8rsh100/MigrationMind/actions/workflows/ci.yml/badge.svg)](https://github.com/H8rsh100/MigrationMind/actions/workflows/ci.yml)
+[![Risk Analysis](https://github.com/H8rsh100/MigrationMind/actions/workflows/migrationmind.yml/badge.svg)](https://github.com/H8rsh100/MigrationMind/actions/workflows/migrationmind.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -12,10 +14,10 @@
 
 Every engineering team that uses a relational database runs migrations. It is one of the **highest-risk operations** in the entire deployment lifecycle. A single bad migration can:
 
-- 🔒 Lock a table for minutes on a high-traffic database, causing a full outage
-- 💥 Drop a column that 3 microservices are still reading
-- 🚫 Run irreversibly and corrupt data with no clean rollback path
-- ✅ Pass CI/CD checks completely fine and still destroy production
+- 🔒 Lock a table for minutes on a high-traffic database, causing a full outage.
+- 💥 Drop a column that 3 microservices are still reading.
+- 🚫 Run irreversibly and corrupt data with no clean rollback path.
+- ✅ Pass CI/CD checks completely fine and still destroy production.
 
 The current state of the art is: a senior DBA manually reviews it, or you just run it and pray.
 
@@ -71,15 +73,38 @@ Suggested safe rewrite:
 
 ## Architecture
 
+MigrationMind runs DDL analysis sequentially across a series of specialized parsing, simulation, and estimation modules:
+
+```mermaid
+graph TD
+    A[Migration SQL File] --> Stage1[Stage 1: AST Parser<br/>sqlglot DDL Extraction]
+    B[Current Schema Dump] --> Stage2[Stage 2: Schema Diff<br/>Before/After State Comparison]
+    C[Query Log File] --> Stage3[Stage 3: Query Impact<br/>Dependency Cross-Match]
+    
+    Stage1 --> Stage2
+    Stage2 --> Stage3
+    
+    Stage3 --> Stage4[Stage 4: Lock Engine<br/>Downtime & Lock Classification]
+    Stage4 --> Stage5[Stage 5: Rollback Analyzer<br/>Complexity Classification]
+    Stage5 --> Stage6[Stage 6: LLM Layer<br/>LiteLLM Reasoning & Suggestion]
+    Stage6 --> Stage7[Stage 7: Report Generator<br/>Terminal / Markdown / JSON]
+    
+    style Stage1 fill:#1a73e8,stroke:#fff,stroke-width:2px,color:#fff
+    style Stage2 fill:#1a73e8,stroke:#fff,stroke-width:2px,color:#fff
+    style Stage3 fill:#1a73e8,stroke:#fff,stroke-width:2px,color:#fff
+    style Stage4 fill:#f29900,stroke:#fff,stroke-width:2px,color:#fff
+    style Stage5 fill:#f29900,stroke:#fff,stroke-width:2px,color:#fff
+    style Stage6 fill:#12b5cb,stroke:#fff,stroke-width:2px,color:#fff
+    style Stage7 fill:#15803d,stroke:#fff,stroke-width:2px,color:#fff
 ```
-Stage 1 — Parse         SQLGlot AST extraction of all DDL operations
-Stage 2 — Schema Diff   Before/after schema model, detect removed/changed objects
-Stage 3 — Query Impact  Cross-match query log against schema diff
-Stage 4 — Lock Engine   Rule-based lock type + downtime estimation
-Stage 5 — Rollback      Classify rollback complexity per operation
-Stage 6 — LLM Layer     LiteLLM reasoning for plain-English summary + rewrites
-Stage 7 — Report        Rich terminal / JSON / Markdown output
-```
+
+- **Stage 1 — Parse**: Extracts Abstract Syntax Trees (ASTs) of all DDL operations.
+- **Stage 2 — Schema Diff**: Creates before/after schema models to detect removed or modified structures.
+- **Stage 3 — Query Impact**: Cross-matches slow query logs against schema diffs to identify missing resources.
+- **Stage 4 — Lock Engine**: Estimates lock severity and maximum downtime durations.
+- **Stage 5 — Rollback**: Classifies the complexity and risk of reversing each change.
+- **Stage 6 — LLM Layer**: Generates human-friendly explanations and suggests safe refactoring structures.
+- **Stage 7 — Report**: Publishes findings to terminals, JSON payloads, or markdown documents.
 
 ## Installation
 
