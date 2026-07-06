@@ -192,7 +192,7 @@ def analyze_lock(op: DDLOperation, db_version: int = 14, row_count: Optional[int
     # CREATE INDEX
     # ------------------------------------------------------------------
     elif op.operation_class == OperationClass.CREATE_INDEX:
-        is_concurrent = any("CONCURRENTLY" in n.upper() for n in op.notes)
+        is_concurrent = any("CONCURRENTLY FLAG" in n.upper() for n in op.notes)
         if dialect in ("postgres", "postgresql") and is_concurrent:
             dur_min, dur_max = _estimate_duration(row_count, 1_000_000)
             notes.append(

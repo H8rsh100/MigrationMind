@@ -167,57 +167,82 @@ def analyze_query_impact(
 
     for query in queries:
         refs = _extract_references(query, dialect=dialect)
+        query_tables = [t.lower() for t in refs.keys() if t != "*"]
 
         for table, cols in refs.items():
             tl = table.lower()
 
             # Check column removal
             if tl in removed_cols:
-                for col in cols:
-                    if col.lower() in removed_cols[tl]:
-                        impacts.append(QueryImpact(
-                            query=query[:300],
-                            impact_type="column_missing",
-                            severity=RiskLevel.CRITICAL,
-                            description=(
-                                f"Column `{col}` on table `{table}` is being dropped. "
-                                "This query will raise a column-not-found error."
-                            ),
-                            affected_table=table,
-                            affected_column=col,
-                        ))
+                target_tables = [tl]
+            elif tl == "*":
+                target_tables = query_tables
+            else:
+                target_tables = []
+
+            for t_target in target_tables:
+                if t_target in removed_cols:
+                    for col in cols:
+                        if col.lower() in removed_cols[t_target]:
+                            impacts.append(QueryImpact(
+                                query=query[:300],
+                                impact_type="column_missing",
+                                severity=RiskLevel.CRITICAL,
+                                description=(
+                                    f"Column `{col}` on table `{t_target}` is being dropped. "
+                                    "This query will raise a column-not-found error."
+                                ),
+                                affected_table=t_target,
+                                affected_column=col,
+                            ))
 
             # Check renamed columns
             if tl in renamed_cols:
-                for col in cols:
-                    if col.lower() in renamed_cols[tl]:
-                        impacts.append(QueryImpact(
-                            query=query[:300],
-                            impact_type="column_renamed",
-                            severity=RiskLevel.HIGH,
-                            description=(
-                                f"Column `{col}` on `{table}` is being renamed. "
-                                "This query will fail after migration."
-                            ),
-                            affected_table=table,
-                            affected_column=col,
-                        ))
+                target_rename_tables = [tl]
+            elif tl == "*":
+                target_rename_tables = query_tables
+            else:
+                target_rename_tables = []
+
+            for t_target in target_rename_tables:
+                if t_target in renamed_cols:
+                    for col in cols:
+                        if col.lower() in renamed_cols[t_target]:
+                            impacts.append(QueryImpact(
+                                query=query[:300],
+                                impact_type="column_renamed",
+                                severity=RiskLevel.HIGH,
+                                description=(
+                                    f"Column `{col}` on `{t_target}` is being renamed. "
+                                    "This query will fail after migration."
+                                ),
+                                affected_table=t_target,
+                                affected_column=col,
+                            ))
 
             # Check type changes
             if tl in type_changed_cols:
-                for col in cols:
-                    if col.lower() in type_changed_cols[tl]:
-                        impacts.append(QueryImpact(
-                            query=query[:300],
-                            impact_type="type_mismatch",
-                            severity=RiskLevel.MEDIUM,
-                            description=(
-                                f"Column `{col}` on `{table}` has a type change. "
-                                "Implicit cast may fail or cause data truncation."
-                            ),
-                            affected_table=table,
-                            affected_column=col,
-                        ))
+                target_type_tables = [tl]
+            elif tl == "*":
+                target_type_tables = query_tables
+            else:
+                target_type_tables = []
+
+            for t_target in target_type_tables:
+                if t_target in type_changed_cols:
+                    for col in cols:
+                        if col.lower() in type_changed_cols[t_target]:
+                            impacts.append(QueryImpact(
+                                query=query[:300],
+                                impact_type="type_mismatch",
+                                severity=RiskLevel.MEDIUM,
+                                description=(
+                                    f"Column `{col}` on `{t_target}` has a type change. "
+                                    "Implicit cast may fail or cause data truncation."
+                                ),
+                                affected_table=t_target,
+                                affected_column=col,
+                            ))
 
             # Check index removal → performance impact
             if tl in removed_indexes:

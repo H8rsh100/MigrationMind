@@ -21,7 +21,7 @@ from migrationmind.models.operation import DDLOperation, OperationClass
 
 # Map sqlglot expression types to our OperationClass
 _EXPR_TO_OP: dict[type, OperationClass] = {
-    exp.AlterTable: OperationClass.UNKNOWN,  # handled specially
+    exp.Alter: OperationClass.UNKNOWN,        # handled specially
     exp.Create: OperationClass.UNKNOWN,       # handled specially
     exp.Drop: OperationClass.UNKNOWN,         # handled specially
     exp.TruncateTable: OperationClass.TRUNCATE_TABLE,
@@ -49,7 +49,7 @@ def _extract_table_name(node: exp.Expression) -> str:
     return ""
 
 
-def _parse_alter_table(stmt: exp.AlterTable, raw_sql: str, dialect: str) -> list[DDLOperation]:
+def _parse_alter_table(stmt: exp.Alter, raw_sql: str, dialect: str) -> list[DDLOperation]:
     """Parse ALTER TABLE into one or more DDLOperation objects."""
     ops: list[DDLOperation] = []
     table_name = stmt.this.name if stmt.this else ""
@@ -57,25 +57,23 @@ def _parse_alter_table(stmt: exp.AlterTable, raw_sql: str, dialect: str) -> list
     for action in stmt.args.get("actions", []):
         op = DDLOperation(raw_sql=raw_sql.strip(), dialect=dialect, target_table=table_name)
 
-        if isinstance(action, exp.AddColumn):
+        if isinstance(action, exp.ColumnDef):
             op.operation_class = OperationClass.ADD_COLUMN
-            col = action.find(exp.ColumnDef)
-            op.target_column = col.name if col else None
+            op.target_column = action.name
 
             # Check for NOT NULL without default — dangerous
-            if col:
-                constraints = col.args.get("constraints", [])
-                has_not_null = any(
-                    isinstance(c.kind, exp.NotNullColumnConstraint) for c in constraints
+            constraints = action.args.get("constraints", [])
+            has_not_null = any(
+                isinstance(c.kind, exp.NotNullColumnConstraint) for c in constraints
+            )
+            has_default = any(
+                isinstance(c.kind, exp.DefaultColumnConstraint) for c in constraints
+            )
+            if has_not_null and not has_default:
+                op.notes.append(
+                    "NOT NULL column added without DEFAULT — "
+                    "will fail on non-empty tables unless backfilled first."
                 )
-                has_default = any(
-                    isinstance(c.kind, exp.DefaultColumnConstraint) for c in constraints
-                )
-                if has_not_null and not has_default:
-                    op.notes.append(
-                        "NOT NULL column added without DEFAULT — "
-                        "will fail on non-empty tables unless backfilled first."
-                    )
 
         elif isinstance(action, exp.Drop):
             kind = (action.args.get("kind") or "").upper()
@@ -129,7 +127,8 @@ def _parse_create(stmt: exp.Create, raw_sql: str, dialect: str) -> list[DDLOpera
 
     if kind == "TABLE":
         op.operation_class = OperationClass.CREATE_TABLE
-        op.target_table = stmt.this.name if stmt.this else ""
+        table_node = stmt.find(exp.Table)
+        op.target_table = table_node.name if table_node else ""
 
     elif kind == "INDEX":
         op.operation_class = OperationClass.CREATE_INDEX
@@ -147,11 +146,13 @@ def _parse_create(stmt: exp.Create, raw_sql: str, dialect: str) -> list[DDLOpera
 
     elif kind == "VIEW":
         op.operation_class = OperationClass.CREATE_VIEW
-        op.target_table = stmt.this.name if stmt.this else ""
+        table_node = stmt.find(exp.Table)
+        op.target_table = table_node.name if table_node else ""
 
     else:
         op.operation_class = OperationClass.UNKNOWN
-        op.target_table = stmt.this.name if stmt.this else ""
+        table_node = stmt.find(exp.Table)
+        op.target_table = table_node.name if table_node else ""
 
     return [op]
 
@@ -163,7 +164,8 @@ def _parse_drop(stmt: exp.Drop, raw_sql: str, dialect: str) -> list[DDLOperation
 
     if kind == "TABLE":
         op.operation_class = OperationClass.DROP_TABLE
-        op.target_table = stmt.this.name if stmt.this else ""
+        table_node = stmt.find(exp.Table)
+        op.target_table = table_node.name if table_node else ""
         op.notes.append("DROP TABLE is irreversible without a backup.")
 
     elif kind in ("INDEX", "KEY"):
@@ -173,13 +175,62 @@ def _parse_drop(stmt: exp.Drop, raw_sql: str, dialect: str) -> list[DDLOperation
 
     elif kind == "VIEW":
         op.operation_class = OperationClass.DROP_VIEW
-        op.target_table = stmt.this.name if stmt.this else ""
+        table_node = stmt.find(exp.Table)
+        op.target_table = table_node.name if table_node else ""
 
     else:
         op.operation_class = OperationClass.UNKNOWN
-        op.target_table = stmt.this.name if stmt.this else ""
+        table_node = stmt.find(exp.Table)
+        op.target_table = table_node.name if table_node else ""
 
     return [op]
+
+
+def _preprocess_sql(sql_text: str) -> str:
+    """
+    Preprocess SQL statement to split compound ALTER TABLE statements into 
+    separate simple ALTER TABLE statements, since sqlglot may fail to parse 
+    multiple actions in a single statement.
+    """
+    # Remove comments
+    lines = []
+    for line in sql_text.splitlines():
+        if line.strip().startswith("--"):
+            continue
+        lines.append(line)
+    sql_text = "\n".join(lines)
+
+    # Find ALTER TABLE statements
+    pattern = re.compile(r"ALTER\s+TABLE\s+(\w+)\s+(.*?);", re.IGNORECASE | re.DOTALL)
+    
+    def repl(match):
+        table_name = match.group(1)
+        actions_str = match.group(2)
+        # Split actions by comma, ignoring commas inside parentheses
+        actions = []
+        current = []
+        depth = 0
+        for char in actions_str:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            if char == "," and depth == 0:
+                actions.append("".join(current).strip())
+                current = []
+            else:
+                current.append(char)
+        if current:
+            actions.append("".join(current).strip())
+        
+        # Reconstruct as separate ALTER TABLE statements
+        reconstructed = []
+        for action in actions:
+            if action:
+                reconstructed.append(f"ALTER TABLE {table_name} {action};")
+        return "\n".join(reconstructed)
+
+    return pattern.sub(repl, sql_text)
 
 
 def parse_migration(
@@ -201,6 +252,9 @@ def parse_migration(
     if filepath:
         dialect = _infer_dialect(filepath)
 
+    # Preprocess compound ALTER TABLE statements
+    sql_text = _preprocess_sql(sql_text)
+
     operations: list[DDLOperation] = []
 
     try:
@@ -218,7 +272,7 @@ def parse_migration(
 
         raw_sql = stmt.sql(dialect=dialect)
 
-        if isinstance(stmt, exp.AlterTable):
+        if isinstance(stmt, exp.Alter):
             operations.extend(_parse_alter_table(stmt, raw_sql, dialect))
 
         elif isinstance(stmt, exp.Create):

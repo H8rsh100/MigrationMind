@@ -64,7 +64,8 @@ def load_schema_from_sql(sql_text: str, dialect: str = "postgres") -> SchemaSnap
             kind = (stmt.args.get("kind") or "").upper()
 
             if kind == "TABLE":
-                table_name = stmt.this.name if stmt.this else ""
+                table_node = stmt.find(exp.Table)
+                table_name = table_node.name if table_node else ""
                 if not table_name:
                     continue
 
