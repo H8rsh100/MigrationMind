@@ -188,4 +188,4 @@ make example    # run on bundled example migration
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see LICENSE.
