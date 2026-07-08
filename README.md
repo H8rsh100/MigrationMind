@@ -1,6 +1,6 @@
 # 🧠 MigrationMind
 
-> **AI-powered database migration risk analyzer.** Know exactly what will break, how long it'll take, and whether you can safely roll back — *before* you run a single query in production.
+> **AI-powered database migration risk analyzer.** Know exactly what will break, how long it'll take, and whether you can safely roll back - *before* you run a single query in production.
 
 [![CI Pipeline](https://github.com/H8rsh100/MigrationMind/actions/workflows/ci.yml/badge.svg)](https://github.com/H8rsh100/MigrationMind/actions/workflows/ci.yml)
 [![Risk Analysis](https://github.com/H8rsh100/MigrationMind/actions/workflows/migrationmind.yml/badge.svg)](https://github.com/H8rsh100/MigrationMind/actions/workflows/migrationmind.yml)
@@ -25,9 +25,9 @@ The current state of the art is: a senior DBA manually reviews it, or you just r
 
 MigrationMind takes three inputs:
 
-1. **Migration file(s)** — SQL, Alembic, Flyway, or raw DDL
-2. **Current schema dump** — your live schema snapshot
-3. **Query log** *(optional)* — slow query log or query pattern file
+1. **Migration file(s)** - SQL, Alembic, Flyway, or raw DDL
+2. **Current schema dump** - your live schema snapshot
+3. **Query log** *(optional)* - slow query log or query pattern file
 
 It runs a **multi-stage analysis pipeline** and produces a structured risk report.
 
@@ -41,7 +41,7 @@ migrationmind analyze \
 ```
 
 ```
-MigrationMind Risk Report — 0042_add_user_index.sql
+MigrationMind Risk Report - 0042_add_user_index.sql
 ════════════════════════════════════════════════════
 
 Risk Score: HIGH (74/100)
@@ -98,13 +98,13 @@ graph TD
     style Stage7 fill:#15803d,stroke:#fff,stroke-width:2px,color:#fff
 ```
 
-- **Stage 1 — Parse**: Extracts Abstract Syntax Trees (ASTs) of all DDL operations.
-- **Stage 2 — Schema Diff**: Creates before/after schema models to detect removed or modified structures.
-- **Stage 3 — Query Impact**: Cross-matches slow query logs against schema diffs to identify missing resources.
-- **Stage 4 — Lock Engine**: Estimates lock severity and maximum downtime durations.
-- **Stage 5 — Rollback**: Classifies the complexity and risk of reversing each change.
-- **Stage 6 — LLM Layer**: Generates human-friendly explanations and suggests safe refactoring structures.
-- **Stage 7 — Report**: Publishes findings to terminals, JSON payloads, or markdown documents.
+- **Stage 1 - Parse**: Extracts Abstract Syntax Trees (ASTs) of all DDL operations.
+- **Stage 2 - Schema Diff**: Creates before/after schema models to detect removed or modified structures.
+- **Stage 3 - Query Impact**: Cross-matches slow query logs against schema diffs to identify missing resources.
+- **Stage 4 - Lock Engine**: Estimates lock severity and maximum downtime durations.
+- **Stage 5 - Rollback**: Classifies the complexity and risk of reversing each change.
+- **Stage 6 - LLM Layer**: Generates human-friendly explanations and suggests safe refactoring structures.
+- **Stage 7 - Report**: Publishes findings to terminals, JSON payloads, or markdown documents.
 
 ## Installation
 
